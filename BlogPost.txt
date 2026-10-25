@@ -1,0 +1,135 @@
+#04 隨機 App — 今天騎哪座山？台北單車爬坡路線隨機抽
+
+作業題目：隨機 App
+資料來源：單車百岳 bike100.tw 台北路線 https://bike100.tw/?filter_county=taipei
+主角：台北 20 條單車爬坡路線（劍南路、風櫃嘴、貓空到如來神掌）
+開發環境：Xcode 27 / iOS 27 / SwiftUI
+
+
+前言
+
+週末想騎車，最常卡住的不是體力，而是「今天要騎哪裡？」。所以這次的隨機 App，我做了一個單車路線抽籤機：按下「隨機出發」，App 從台北 20 條路線中抽一條，顯示路線圖、距離、爬升與平均坡度，抽到什麼就騎什麼。
+
+
+成果展示
+
+（放 App 錄影 GIF 與截圖）
+
+
+畫面結構
+
+整個畫面是一個垂直 ScrollView，由上到下分成五個區塊：
+
+1. 路線圖：Apple Maps 底圖加上紅色路線軌跡與起點標記。
+2. 路線標題：上方灰字顯示區域，下方大字顯示路線名稱。
+3. 數據卡片：長度、爬升、平均坡度三格。
+4. 路線介紹：沿途景點、最陡坡度與補給建議。
+5. 隨機按鈕：按下後以動畫切換到另一條路線。
+
+
+關鍵實作
+
+1. 不會連抽到同一條的隨機邏輯
+
+直接用 randomElement() 很容易連續抽到同一條，看起來像按鈕沒反應。所以先排除目前這條，再從剩下的路線中抽：
+
+private func randomIndex() -> Int {
+    let candidates = routes.indices.filter { $0 != selectedRouteIndex }
+    return candidates.randomElement() ?? selectedRouteIndex
+}
+
+按鈕用 withAnimation 包起來，切換時會有淡入淡出效果：
+
+Button {
+    withAnimation {
+        selectedRouteIndex = randomIndex()
+    }
+} label: {
+    Text("隨機出發 🚲")
+        .font(.title3.weight(.semibold))
+        .padding(.horizontal, 24)
+        .padding(.vertical, 6)
+}
+.buttonStyle(.borderedProminent)
+.buttonBorderShape(.capsule)
+.controlSize(.large)
+
+
+2. 用 struct 整理路線資料
+
+struct Route {
+    let name: String
+    let area: String
+    let imageName: String
+    let description: String
+    let distance: Double
+    let elevationGain: Int
+    let averageGrade: Double
+}
+
+
+3. 可重複使用的數據卡片
+
+三格數據只差圖示、數值與標題，所以抽成一個 StatCard：
+
+struct StatCard: View {
+    let systemImage: String
+    let value: String
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(.orange)
+            Text(value)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+frame(maxWidth: .infinity) 讓三張卡片平均分配寬度；minimumScaleFactor(0.7) 讓「135.1 km」這種較長的數字在空間不夠時自動縮小，而不會被截斷。
+
+
+4. 自己畫路線圖
+
+我用 MKMapSnapshotter 拍一張地圖快照，再把每條路線的 GPS 座標換算成圖片上的點，連成紅線：
+
+let snap = try await MKMapSnapshotter(options: options).start()
+
+let path = NSBezierPath()
+for (i, c) in coords.enumerated() {
+    var p = snap.point(for: c)
+    p.y = mapRect.height - p.y   // macOS 座標原點在左下角，要翻轉
+    i == 0 ? path.move(to: p) : path.line(to: p)
+}
+path.lineWidth = 8
+NSColor.systemRed.setStroke()
+path.stroke()
+
+
+5. 平均坡度只算上坡
+
+一開始用「總爬升 ÷ 總距離」，劍南路只有 2.6%，因為原路折返的下坡也被算進去。改成把 GPS 軌跡每 200 公尺切一段，只加總海拔上升的路段，劍南路變成 5.1%，清天宮 10.8%，比較符合實際騎乘感受。
+
+
+心得與挑戰
+
+1. 資料蒐集最花時間。單車百岳多數路線頁面需要會員才能看，最後是從每條路線對應的 Strava 公開路線取得距離、爬升與 GPS 軌跡。
+
+2. 路線圖一開始上下顛倒。風櫃嘴應該從外雙溪往東北爬，畫出來卻往東南。原因是 macOS 的 point(for:) 原點在左下角，而畫布原點在左上角。把 y 翻轉後，再逐條和 Strava 官方路線圖對照，才全部正確。看起來合理不代表是對的，一定要拿真實資料驗證。
+
+3. 刪減也是設計。原本每條路線有兩張照片、名稱旁有 emoji、還有難度欄位，資訊太滿。最後只留一張路線圖和三個數字，畫面清爽很多。
+
+
+資料來源：單車百岳 bike100.tw、Strava 公開路線、Apple Maps
+
+GitHub：（填入連結）
